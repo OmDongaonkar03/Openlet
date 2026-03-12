@@ -20,6 +20,7 @@ No login, no app, no friction for the person giving feedback.
 | Backend | Cloudflare Workers + Hono.js |
 | Database | Cloudflare D1 (SQLite) |
 | Auth | JWT via Web Crypto API (no external deps) |
+| Spam prevention | Cloudflare Turnstile + FingerprintJS + cookie |
 | Hosting | Cloudflare Pages (frontend) + Workers (backend) |
 
 ---
@@ -28,34 +29,36 @@ No login, no app, no friction for the person giving feedback.
 
 ```
 openlet/
-├── fe/                         # Frontend (React + Vite)
+├── frontend/                       # React + Vite
 │   ├── src/
 │   │   ├── pages/
-│   │   │   ├── Index.tsx       # Login / Register
-│   │   │   ├── Dashboard.tsx   # Your feedback pages
-│   │   │   ├── Create.tsx      # Create a new page
-│   │   │   ├── PublicPage.tsx  # Public submission form (/p/:slug)
-│   │   │   └── Responses.tsx   # View responses (owner only)
+│   │   │   ├── Index.tsx           # Login / Register
+│   │   │   ├── Dashboard.tsx       # Your feedback pages
+│   │   │   ├── Create.tsx          # Create a new page
+│   │   │   ├── PublicPage.tsx      # Public submission form (/p/:slug)
+│   │   │   └── Responses.tsx       # View responses (owner only)
 │   │   ├── contexts/
-│   │   │   └── AuthContext.tsx # Auth state + redirect logic
+│   │   │   └── AuthContext.tsx     # Auth state + redirect logic
 │   │   ├── lib/
-│   │   │   └── api.ts          # All API calls
+│   │   │   └── api.ts              # All API calls
 │   │   └── components/
 │   │       └── ProtectedRoute.tsx
-│   └── .env                    # VITE_API_URL
+│   └── .env                        # VITE_API_URL, VITE_TURNSTILE_SITE_KEY
 │
-└── be/                         # Backend (Cloudflare Worker)
+└── worker/                         # Cloudflare Worker + Hono.js
     ├── src/
-    │   ├── index.js            # Hono app, CORS, route mounting
+    │   ├── index.js                # Hono app, CORS, route mounting
     │   ├── middleware/
-    │   │   └── auth.js         # JWT sign/verify (Web Crypto), authMiddleware
+    │   │   └── auth.js             # JWT sign/verify (Web Crypto), authMiddleware
     │   └── routes/
-    │       ├── auth.js         # POST /auth/register, POST /auth/login
-    │       ├── pages.js        # GET/POST /pages, GET /pages/:slug
-    │       └── responses.js    # POST /responses/:slug, GET /responses/:slug
-    ├── schema.sql
+    │       ├── auth.js             # POST /auth/register, POST /auth/login
+    │       ├── pages.js            # GET/POST /pages, GET /pages/:slug
+    │       └── responses.js        # POST /responses/:slug, GET /responses/:slug
+    ├── migrations/
+    │   ├── 0001_initial_schema.sql # users, pages, responses tables
+    │   └── 0002_spam_prevention.sql# submission_log table
     ├── wrangler.toml
-    └── .dev.vars               # Local secrets (gitignored)
+    └── .dev.vars                   # Local secrets (gitignored)
 ```
 
 ---
@@ -70,17 +73,29 @@ openlet/
 | POST | `/pages` | ✅ | Create a page `{title, question, slug}` |
 | GET | `/pages/:slug` | — | Public page info |
 | GET | `/pages/:slug/check` | — | Slug availability check |
-| POST | `/responses/:slug` | — | Submit `{rating, message}` anonymously |
+| POST | `/responses/:slug` | — | Submit `{rating, message, fingerprint, turnstileToken}` anonymously |
 | GET | `/responses/:slug` | ✅ | `{page, stats, responses[]}` — owner only |
+
+---
+
+## Spam prevention
+
+Every anonymous submission passes through three layers before being saved:
+
+1. **Cookie** — checked instantly on page load. If the user has already submitted to this slug, the form is never shown. No server round-trip.
+2. **Cloudflare Turnstile** — invisible bot challenge loaded in the form. Submit button is disabled until the token is issued. Token is verified server-side against CF's API before anything else runs.
+3. **IP + Fingerprint** — after Turnstile passes, the worker checks `submission_log` for a matching `(page_id, ip)` or `(page_id, fingerprint)` pair. Either match blocks the submission with a `429`.
+
+On success, the IP and fingerprint are written to `submission_log` for future checks.
 
 ---
 
 ## Local development
 
-### Backend
+### Worker
 
 ```bash
-cd be
+cd worker
 npm install
 
 # Create D1 database
@@ -88,10 +103,14 @@ npx wrangler d1 create openlet
 # Copy the database_id printed above into wrangler.toml
 
 # Create local secrets file
-echo "JWT_SECRET=your_local_secret_here" > .dev.vars
+cat > .dev.vars << EOF
+JWT_SECRET=your_local_jwt_secret
+TURNSTILE_SECRET=1x0000000000000000000000000000000AA
+EOF
+# TURNSTILE_SECRET above is CF's official test key — always passes locally
 
-# Apply schema
-npx wrangler d1 execute openlet --local --file=./schema.sql
+# Apply all migrations
+npx wrangler d1 migrations apply openlet --local
 
 # Start dev server
 npm run dev
@@ -101,11 +120,15 @@ npm run dev
 ### Frontend
 
 ```bash
-cd fe
+cd frontend
 npm install
 
-# Set API URL
-echo "VITE_API_URL=http://localhost:8787" > .env
+# Set env vars
+cat > .env << EOF
+VITE_API_URL=http://localhost:8787
+VITE_TURNSTILE_SITE_KEY=1x00000000000000000000AA
+EOF
+# VITE_TURNSTILE_SITE_KEY above is CF's official test site key — always passes locally
 
 # Start dev server
 npm run dev
@@ -116,35 +139,43 @@ npm run dev
 
 ## Deploy
 
-### 1. Deploy the worker
+### 1. Create a Turnstile widget
+
+Go to [dash.cloudflare.com](https://dash.cloudflare.com) → Turnstile → Add widget → add your domain → copy the **Site Key** and **Secret Key**.
+
+### 2. Deploy the worker
 
 ```bash
-cd be
+cd worker
 npm install
 
-# Set JWT secret in Cloudflare (never put this in wrangler.toml)
+# Set secrets in Cloudflare
 npx wrangler secret put JWT_SECRET
+npx wrangler secret put TURNSTILE_SECRET
 
-# Apply schema to production DB
-npx wrangler d1 execute openlet --remote --file=./schema.sql
+# Apply all migrations to production DB
+npx wrangler d1 migrations apply openlet --remote
 
 # Deploy
 npm run deploy
 # → prints your worker URL: https://openlet-worker.<subdomain>.workers.dev
 ```
 
-### 2. Update CORS
+### 3. Update CORS
 
-In `be/src/index.js`, add your Cloudflare Pages domain to the allowed origins list, then redeploy the worker.
+In `worker/src/index.js`, add your Cloudflare Pages domain to the allowed origins list, then redeploy the worker.
 
-### 3. Deploy the frontend
+### 4. Deploy the frontend
 
 ```bash
-cd fe
+cd frontend
 npm install
 
-# Update API URL to your live worker
-echo "VITE_API_URL=https://openlet-worker.<subdomain>.workers.dev" > .env
+# Update env vars with real production values
+cat > .env << EOF
+VITE_API_URL=https://openlet-worker.<subdomain>.workers.dev
+VITE_TURNSTILE_SITE_KEY=your_real_turnstile_site_key
+EOF
 
 npm run build
 npx wrangler pages deploy dist --project-name=openlet
@@ -153,21 +184,23 @@ npx wrangler pages deploy dist --project-name=openlet
 Or connect the repo to Cloudflare Pages via the dashboard with:
 - Build command: `npm run build`
 - Output directory: `dist`
-- Environment variable: `VITE_API_URL` = your worker URL
+- Environment variables: `VITE_API_URL` and `VITE_TURNSTILE_SITE_KEY`
 
 ---
 
 ## Environment variables
 
-### Backend
+### Worker
 
 | Variable | Where | Description |
 |---|---|---|
-| `JWT_SECRET` | CF Secret (via `wrangler secret put`) | Signs and verifies JWTs. Never commit this. |
+| `JWT_SECRET` | CF Secret (`wrangler secret put`) | Signs and verifies JWTs. Never commit this. |
+| `TURNSTILE_SECRET` | CF Secret (`wrangler secret put`) | Verifies Turnstile tokens server-side. Never commit this. |
 
-For local dev, put it in `be/.dev.vars` (already gitignored):
+For local dev, put both in `worker/.dev.vars` (already gitignored):
 ```
-JWT_SECRET=your_local_secret_here
+JWT_SECRET=your_local_jwt_secret
+TURNSTILE_SECRET=1x0000000000000000000000000000000AA
 ```
 
 ### Frontend
@@ -175,26 +208,30 @@ JWT_SECRET=your_local_secret_here
 | Variable | Where | Description |
 |---|---|---|
 | `VITE_API_URL` | `.env` / CF Pages env | Base URL of the deployed worker |
+| `VITE_TURNSTILE_SITE_KEY` | `.env` / CF Pages env | Public site key from Cloudflare Turnstile dashboard |
 
 ---
 
 ## Database schema
 
 ```sql
-users      → id, email, password (PBKDF2), name, created_at
-pages      → id, user_id, slug (UNIQUE), title, question, created_at
-responses  → id, page_id, message (nullable), rating (1–5), created_at
+users          → id, email, password (PBKDF2), name, created_at
+pages          → id, user_id, slug (UNIQUE), title, question, created_at
+responses      → id, page_id, message (nullable), rating (1–5), created_at
+submission_log → id, page_id, ip, fingerprint, submitted_at
 ```
 
 Passwords are hashed with PBKDF2 + SHA-256 + random salt, 100k iterations, using the Web Crypto API — no external dependencies.
 
 JWTs are signed with HMAC-SHA256 and expire after 7 days.
 
+Migrations are managed via Wrangler's built-in D1 migration system under `worker/migrations/`.
+
 ---
 
 ## Roadmap
 
-- [ ] Spam prevention — Cloudflare Turnstile + browser fingerprint + cookie
+- [x] Spam prevention — Cloudflare Turnstile + browser fingerprint + cookie
 - [ ] Delete / edit feedback pages
 - [ ] Email notifications on new response
 - [ ] Response export to CSV

@@ -80,7 +80,7 @@ export async function getPageBySlug(slug: string) {
 // Responses
 export async function submitResponse(
   slug: string,
-  data: { rating: number; message: string },
+  data: { rating: number; message: string; fingerprint: string | null; turnstileToken: string },
 ) {
   return request(`/responses/${slug}`, {
     method: "POST",

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { getPageBySlug, submitResponse } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,90 @@ interface PageData {
   question: string;
 }
 
+// ── Cookie helpers ────────────────────────────────────────────────────────────
+
+function getSubmittedCookie(slug: string): boolean {
+  return document.cookie.split("; ").some((c) => c === `submitted_${slug}=1`);
+}
+
+function setSubmittedCookie(slug: string) {
+  // expires in 1 year
+  const expires = new Date(
+    Date.now() + 365 * 24 * 60 * 60 * 1000,
+  ).toUTCString();
+  document.cookie = `submitted_${slug}=1; expires=${expires}; path=/; SameSite=Lax`;
+}
+
+// ── Turnstile widget ──────────────────────────────────────────────────────────
+
+declare global {
+  interface Window {
+    turnstile: {
+      render: (container: string | HTMLElement, options: object) => string;
+      reset: (widgetId: string) => void;
+      remove: (widgetId: string) => void;
+    };
+  }
+}
+
+function useTurnstile(onSuccess: (token: string) => void) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const widgetIdRef = useRef<string | null>(null);
+  const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
+
+  const reset = useCallback(() => {
+    if (widgetIdRef.current && window.turnstile) {
+      window.turnstile.reset(widgetIdRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Load Turnstile script once
+    if (!document.getElementById("cf-turnstile-script")) {
+      const script = document.createElement("script");
+      script.id = "cf-turnstile-script";
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+
+    // Render widget once script is ready
+    const tryRender = () => {
+      if (containerRef.current && window.turnstile && !widgetIdRef.current) {
+        widgetIdRef.current = window.turnstile.render(containerRef.current, {
+          sitekey: siteKey,
+          callback: onSuccess,
+          theme: "light",
+          size: "normal",
+          retry: "auto",
+          "retry-interval": 3000,
+        });
+      }
+    };
+
+    // Poll until turnstile is available (script might still be loading)
+    const interval = setInterval(() => {
+      if (window.turnstile) {
+        tryRender();
+        clearInterval(interval);
+      }
+    }, 100);
+
+    return () => {
+      clearInterval(interval);
+      if (widgetIdRef.current && window.turnstile) {
+        window.turnstile.remove(widgetIdRef.current);
+        widgetIdRef.current = null;
+      }
+    };
+  }, [siteKey, onSuccess]);
+
+  return { containerRef, reset };
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
 const PublicPage = () => {
   const { slug } = useParams<{ slug: string }>();
   const [page, setPage] = useState<PageData | null>(null);
@@ -31,31 +115,81 @@ const PublicPage = () => {
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
 
+  // Spam prevention state
+  const [fingerprint, setFingerprint] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [alreadySubmitted, setAlreadySubmitted] = useState(false);
+
+  const { containerRef, reset: resetTurnstile } = useTurnstile(
+    useCallback((token: string) => setTurnstileToken(token), []),
+  );
+
+  // ── Load page data ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!slug) return;
+
+    // Cookie check — instant UX, no server round-trip needed
+    if (getSubmittedCookie(slug)) {
+      setAlreadySubmitted(true);
+      setLoading(false);
+      return;
+    }
+
     getPageBySlug(slug)
       .then((data: any) => setPage(data.page ?? data))
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
   }, [slug]);
 
+  // ── Load fingerprint ────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (alreadySubmitted) return;
+    import("@fingerprintjs/fingerprintjs").then((FingerprintJS) => {
+      FingerprintJS.load().then((fp) => {
+        fp.get().then((result) => setFingerprint(result.visitorId));
+      });
+    });
+  }, [alreadySubmitted]);
+
+  // ── Submit ──────────────────────────────────────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (rating === 0) {
       setError("Please select a rating before submitting");
       return;
     }
+    if (!turnstileToken) {
+      setError("Bot check not completed yet. Please wait a moment.");
+      return;
+    }
+
     setSubmitting(true);
     setError("");
+
     try {
-      await submitResponse(slug!, { rating, message: text });
+      await submitResponse(slug!, {
+        rating,
+        message: text,
+        fingerprint,
+        turnstileToken,
+      });
+      setSubmittedCookie(slug!);
       setSubmitted(true);
     } catch (e: any) {
-      setError(e.message || "Failed to submit");
+      if (e.message === "already_submitted") {
+        setAlreadySubmitted(true);
+      } else {
+        setError(e.message || "Failed to submit");
+        resetTurnstile(); // get a fresh token on error
+        setTurnstileToken(null);
+      }
     } finally {
       setSubmitting(false);
     }
   };
+
+  // ── States ──────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -68,7 +202,6 @@ const PublicPage = () => {
   if (notFound) {
     return (
       <div className="min-h-screen flex flex-col lg:flex-row">
-        {/* Left */}
         <div className="lg:w-1/2 border-r border-border flex flex-col justify-between px-12 py-16 bg-secondary/30 min-h-[40vh] lg:min-h-screen">
           <div className="flex items-center gap-2">
             <MessageSquare className="w-4 h-4 text-primary" />
@@ -103,7 +236,6 @@ const PublicPage = () => {
             Free forever · No credit card needed
           </p>
         </div>
-        {/* Right */}
         <div className="lg:w-1/2 flex flex-col items-center justify-center px-12 py-16 text-center">
           <div className="w-14 h-14 rounded-full border border-border flex items-center justify-center mb-6">
             <MessageSquare className="w-6 h-6 text-muted-foreground" />
@@ -114,8 +246,7 @@ const PublicPage = () => {
           </p>
           <Button asChild>
             <Link to="/" className="gap-1.5">
-              Create your own page
-              <ArrowRight className="w-3.5 h-3.5" />
+              Create your own page <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </Button>
         </div>
@@ -123,10 +254,10 @@ const PublicPage = () => {
     );
   }
 
-  if (submitted) {
+  // Already submitted — shown for both cookie hit AND server 429
+  if (alreadySubmitted) {
     return (
       <div className="min-h-screen flex flex-col lg:flex-row">
-        {/* Left — what Openlet is */}
         <div className="lg:w-1/2 border-r border-border flex flex-col justify-between px-12 py-16 bg-secondary/30 min-h-[40vh] lg:min-h-screen">
           <div className="flex items-center gap-2">
             <MessageSquare className="w-4 h-4 text-primary" />
@@ -144,13 +275,13 @@ const PublicPage = () => {
               Completely anonymously.
             </h2>
             <p className="text-sm text-muted-foreground leading-relaxed max-w-xs mb-10">
-              No account, no tracking, no cookies. Your name was never asked for
-              because it was never needed.
+              No account, no tracking, no cookies linked to your identity. Your
+              name was never asked for because it was never needed.
             </p>
             <div className="space-y-5">
               {[
                 { icon: EyeOff, text: "Your identity is never stored" },
-                { icon: ShieldCheck, text: "No cookies or tracking scripts" },
+                { icon: ShieldCheck, text: "No tracking scripts or profiling" },
                 {
                   icon: Zap,
                   text: "Response delivered instantly to the creator",
@@ -167,7 +298,77 @@ const PublicPage = () => {
             Free forever · No credit card needed
           </p>
         </div>
-        {/* Right — thank you + CTA */}
+        <div className="lg:w-1/2 flex flex-col items-center justify-center px-12 py-16 text-center">
+          <div className="w-14 h-14 rounded-full bg-secondary flex items-center justify-center mb-6">
+            <Check className="w-6 h-6 text-muted-foreground" />
+          </div>
+          <h3 className="text-2xl mb-2">Already submitted.</h3>
+          <p className="text-sm text-muted-foreground mb-10 max-w-xs">
+            You've already left feedback on this page. Each person can respond
+            once to keep things fair and honest.
+          </p>
+          <Card className="w-full max-w-xs text-left">
+            <CardContent className="pt-5 pb-5 px-5">
+              <p className="text-sm mb-1">Want feedback like this?</p>
+              <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
+                Create your own anonymous feedback page on Openlet. Free, no
+                credit card, takes 30 seconds.
+              </p>
+              <Button asChild size="sm" className="w-full gap-1.5">
+                <Link to="/">
+                  Create your page free <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (submitted) {
+    return (
+      <div className="min-h-screen flex flex-col lg:flex-row">
+        <div className="lg:w-1/2 border-r border-border flex flex-col justify-between px-12 py-16 bg-secondary/30 min-h-[40vh] lg:min-h-screen">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="w-4 h-4 text-primary" />
+            <span className="text-xs tracking-widest uppercase text-muted-foreground">
+              Openlet
+            </span>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-widest text-muted-foreground mb-4">
+              Your privacy
+            </p>
+            <h2 className="text-3xl mb-4 leading-snug">
+              You were heard.
+              <br />
+              Completely anonymously.
+            </h2>
+            <p className="text-sm text-muted-foreground leading-relaxed max-w-xs mb-10">
+              No account, no tracking, no cookies linked to your identity. Your
+              name was never asked for because it was never needed.
+            </p>
+            <div className="space-y-5">
+              {[
+                { icon: EyeOff, text: "Your identity is never stored" },
+                { icon: ShieldCheck, text: "No tracking scripts or profiling" },
+                {
+                  icon: Zap,
+                  text: "Response delivered instantly to the creator",
+                },
+              ].map(({ icon: Icon, text }) => (
+                <div key={text} className="flex items-center gap-3">
+                  <Icon className="w-4 h-4 text-muted-foreground shrink-0" />
+                  <span className="text-sm text-muted-foreground">{text}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Free forever · No credit card needed
+          </p>
+        </div>
         <div className="lg:w-1/2 flex flex-col items-center justify-center px-12 py-16 text-center">
           <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-6">
             <Check className="w-6 h-6 text-primary" />
@@ -186,8 +387,7 @@ const PublicPage = () => {
               </p>
               <Button asChild size="sm" className="w-full gap-1.5">
                 <Link to="/">
-                  Create your page free
-                  <ArrowRight className="w-3.5 h-3.5" />
+                  Create your page free <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
               </Button>
             </CardContent>
@@ -207,7 +407,6 @@ const PublicPage = () => {
             Openlet
           </span>
         </div>
-
         <div>
           <p className="text-xs uppercase tracking-widest text-muted-foreground mb-3">
             You're responding to
@@ -216,7 +415,6 @@ const PublicPage = () => {
           <p className="text-base text-muted-foreground leading-relaxed max-w-xs mb-12">
             {page?.question}
           </p>
-
           <div className="space-y-6">
             {[
               {
@@ -249,7 +447,6 @@ const PublicPage = () => {
             ))}
           </div>
         </div>
-
         <p className="text-xs text-muted-foreground">
           Want your own feedback page?{" "}
           <Link
@@ -316,9 +513,23 @@ const PublicPage = () => {
               />
             </div>
 
+            {/* Turnstile widget */}
+            <div>
+              <div ref={containerRef} />
+              {!turnstileToken && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  Completing bot check...
+                </p>
+              )}
+            </div>
+
             {error && <p className="text-sm text-destructive">{error}</p>}
 
-            <Button type="submit" disabled={submitting} className="w-full">
+            <Button
+              type="submit"
+              disabled={submitting || !turnstileToken}
+              className="w-full"
+            >
               {submitting ? "Submitting..." : "Submit anonymously"}
             </Button>
 
