@@ -1,252 +1,202 @@
-# Openlet — Worker
+# Openlet
 
-Anonymous feedback pages for anyone. Create a page, share a link, get honest responses.
+Anonymous feedback pages. Create a link, share it, get honest responses — no accounts required for respondents.
 
-This is the backend — a Cloudflare Worker built with Hono + D1 (SQLite).
+---
+
+## What it is
+
+Openlet lets anyone create a personal feedback page in 30 seconds. Share the link with your audience. They leave a star rating and an optional message. You read the responses. They stay completely anonymous.
+
+No login, no app, no friction for the person giving feedback.
 
 ---
 
 ## Stack
 
-- **Runtime:** Cloudflare Workers
-- **Framework:** Hono v4
-- **Database:** Cloudflare D1 (SQLite)
-- **Auth:** JWT via Web Crypto API (no external deps)
-- **Password hashing:** PBKDF2 (native, no bcrypt)
+| Layer | Tech |
+|---|---|
+| Frontend | React + Vite + TypeScript + Tailwind + shadcn/ui |
+| Backend | Cloudflare Workers + Hono.js |
+| Database | Cloudflare D1 (SQLite) |
+| Auth | JWT via Web Crypto API (no external deps) |
+| Hosting | Cloudflare Pages (frontend) + Workers (backend) |
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
-worker/
-├── src/
-│   ├── index.js                 # Entry point, CORS, route mounting
-│   ├── middleware/
-│   │   └── auth.js              # JWT sign/verify + auth middleware
-│   └── routes/
-│       ├── auth.js              # Register + login
-│       ├── pages.js             # Feedback page CRUD
-│       └── responses.js         # Submit + view responses
-├── schema.sql                   # D1 table definitions
-├── wrangler.toml                # Cloudflare config
-└── package.json
+openlet/
+├── fe/                         # Frontend (React + Vite)
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── Index.tsx       # Login / Register
+│   │   │   ├── Dashboard.tsx   # Your feedback pages
+│   │   │   ├── Create.tsx      # Create a new page
+│   │   │   ├── PublicPage.tsx  # Public submission form (/p/:slug)
+│   │   │   └── Responses.tsx   # View responses (owner only)
+│   │   ├── contexts/
+│   │   │   └── AuthContext.tsx # Auth state + redirect logic
+│   │   ├── lib/
+│   │   │   └── api.ts          # All API calls
+│   │   └── components/
+│   │       └── ProtectedRoute.tsx
+│   └── .env                    # VITE_API_URL
+│
+└── be/                         # Backend (Cloudflare Worker)
+    ├── src/
+    │   ├── index.js            # Hono app, CORS, route mounting
+    │   ├── middleware/
+    │   │   └── auth.js         # JWT sign/verify (Web Crypto), authMiddleware
+    │   └── routes/
+    │       ├── auth.js         # POST /auth/register, POST /auth/login
+    │       ├── pages.js        # GET/POST /pages, GET /pages/:slug
+    │       └── responses.js    # POST /responses/:slug, GET /responses/:slug
+    ├── schema.sql
+    ├── wrangler.toml
+    └── .dev.vars               # Local secrets (gitignored)
 ```
 
 ---
 
-## Prerequisites
+## API
 
-- [Node.js](https://nodejs.org) v18+
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) — installed via npm
-- A free [Cloudflare account](https://dash.cloudflare.com/sign-up)
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| POST | `/auth/register` | — | `{email, password, name}` → `{token, user}` |
+| POST | `/auth/login` | — | `{email, password}` → `{token, user}` |
+| GET | `/pages` | ✅ | List your pages with response counts |
+| POST | `/pages` | ✅ | Create a page `{title, question, slug}` |
+| GET | `/pages/:slug` | — | Public page info |
+| GET | `/pages/:slug/check` | — | Slug availability check |
+| POST | `/responses/:slug` | — | Submit `{rating, message}` anonymously |
+| GET | `/responses/:slug` | ✅ | `{page, stats, responses[]}` — owner only |
 
 ---
 
-## Local Setup
+## Local development
 
-### 1. Install dependencies
+### Backend
 
 ```bash
+cd be
 npm install
-```
 
-### 2. Create the D1 database
-
-```bash
+# Create D1 database
 npx wrangler d1 create openlet
-```
+# Copy the database_id printed above into wrangler.toml
 
-Copy the `database_id` from the output and paste it into `wrangler.toml`:
+# Create local secrets file
+echo "JWT_SECRET=your_local_secret_here" > .dev.vars
 
-```toml
-[[d1_databases]]
-binding       = "DB"
-database_name = "openlet"
-database_id   = "PASTE_YOUR_ID_HERE"   # ← here
-```
+# Apply schema
+npx wrangler d1 execute openlet --local --file=./schema.sql
 
-### 3. Set your JWT secret
-
-In `wrangler.toml`, replace the placeholder:
-
-```toml
-[vars]
-JWT_SECRET = "replace-with-a-long-random-string"
-```
-
-> For production, use `wrangler secret put JWT_SECRET` instead of storing it in the toml.
-
-### 4. Run the schema migration
-
-```bash
-npm run db:migrate:local
-```
-
-### 5. Start the dev server
-
-```bash
+# Start dev server
 npm run dev
+# → http://localhost:8787
 ```
 
-Worker is now live at `http://localhost:8787`.
-
----
-
-## API Reference
-
-All requests/responses are JSON. Protected routes require:
-```
-Authorization: Bearer <token>
-```
-
-### Auth
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| POST | `/auth/register` | — | Create account |
-| POST | `/auth/login` | — | Login, returns JWT |
-
-**Register body:**
-```json
-{ "email": "om@example.com", "password": "minimum8chars", "name": "Om" }
-```
-
-**Login body:**
-```json
-{ "email": "om@example.com", "password": "yourpassword" }
-```
-
-Both return:
-```json
-{ "token": "jwt...", "user": { "id": 1, "email": "...", "name": "..." } }
-```
-
----
-
-### Pages
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/pages` | ✅ | List all your pages |
-| POST | `/pages` | ✅ | Create a new feedback page |
-| GET | `/pages/:slug` | — | Get page info (public) |
-| GET | `/pages/:slug/check` | — | Check if slug is available |
-
-**Create page body:**
-```json
-{
-  "title": "Roast my portfolio",
-  "question": "What's the one thing you'd change about my portfolio?",
-  "slug": "roast-my-portfolio"
-}
-```
-
-Slug rules: 3–40 characters, lowercase letters, numbers, hyphens only.
-
-**List pages response:**
-```json
-{
-  "pages": [
-    {
-      "id": 1,
-      "slug": "roast-my-portfolio",
-      "title": "Roast my portfolio",
-      "question": "What's the one thing...",
-      "created_at": "2025-03-12 10:00:00",
-      "response_count": 14
-    }
-  ]
-}
-```
-
----
-
-### Responses
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| POST | `/responses/:slug` | — | Submit anonymous feedback (public) |
-| GET | `/responses/:slug` | ✅ | View all responses (owner only) |
-
-**Submit response body:**
-```json
-{ "message": "Your hero section copy is too vague.", "rating": 4 }
-```
-
-Rating must be an integer 1–5. Message max 2000 characters.
-
-**View responses:**
-```json
-{
-  "page": { "slug": "roast-my-portfolio", "title": "...", "question": "..." },
-  "stats": { "total": 14, "avg_rating": 3.8 },
-  "responses": [
-    { "id": 5, "message": "...", "rating": 4, "created_at": "..." }
-  ]
-}
-```
-
----
-
-## Deployment
-
-### 1. Push secrets to Cloudflare (don't commit JWT_SECRET)
+### Frontend
 
 ```bash
+cd fe
+npm install
+
+# Set API URL
+echo "VITE_API_URL=http://localhost:8787" > .env
+
+# Start dev server
+npm run dev
+# → http://localhost:5173
+```
+
+---
+
+## Deploy
+
+### 1. Deploy the worker
+
+```bash
+cd be
+npm install
+
+# Set JWT secret in Cloudflare (never put this in wrangler.toml)
 npx wrangler secret put JWT_SECRET
-```
 
-### 2. Run schema on remote D1
+# Apply schema to production DB
+npx wrangler d1 execute openlet --remote --file=./schema.sql
 
-```bash
-npm run db:migrate:remote
-```
-
-### 3. Deploy
-
-```bash
+# Deploy
 npm run deploy
+# → prints your worker URL: https://openlet-worker.<subdomain>.workers.dev
 ```
 
-Your worker is live at `https://openlet-worker.<your-subdomain>.workers.dev`.
+### 2. Update CORS
+
+In `be/src/index.js`, add your Cloudflare Pages domain to the allowed origins list, then redeploy the worker.
+
+### 3. Deploy the frontend
+
+```bash
+cd fe
+npm install
+
+# Update API URL to your live worker
+echo "VITE_API_URL=https://openlet-worker.<subdomain>.workers.dev" > .env
+
+npm run build
+npx wrangler pages deploy dist --project-name=openlet
+```
+
+Or connect the repo to Cloudflare Pages via the dashboard with:
+- Build command: `npm run build`
+- Output directory: `dist`
+- Environment variable: `VITE_API_URL` = your worker URL
 
 ---
 
-## Frontend
+## Environment variables
 
-The frontend (React + Vite + shadcn/ui) lives in `../frontend/`.
-
-Set the API base URL in `frontend/.env`:
-
-```
-VITE_API_URL=http://localhost:8787       # local
-VITE_API_URL=https://openlet-worker.xxx.workers.dev  # production
-```
-
----
-
-## Environment Variables
+### Backend
 
 | Variable | Where | Description |
-|----------|-------|-------------|
-| `JWT_SECRET` | `wrangler.toml` / CF secret | Signs and verifies JWTs |
-| `VITE_API_URL` | Frontend `.env` | Points frontend to the worker |
+|---|---|---|
+| `JWT_SECRET` | CF Secret (via `wrangler secret put`) | Signs and verifies JWTs. Never commit this. |
 
----
-
-## Scripts
-
-```bash
-npm run dev                  # local dev server (localhost:8787)
-npm run deploy               # deploy to Cloudflare
-npm run db:create            # create D1 database
-npm run db:migrate:local     # apply schema locally
-npm run db:migrate:remote    # apply schema on production D1
+For local dev, put it in `be/.dev.vars` (already gitignored):
+```
+JWT_SECRET=your_local_secret_here
 ```
 
+### Frontend
+
+| Variable | Where | Description |
+|---|---|---|
+| `VITE_API_URL` | `.env` / CF Pages env | Base URL of the deployed worker |
+
 ---
 
-## License
+## Database schema
 
-MIT
+```sql
+users      → id, email, password (PBKDF2), name, created_at
+pages      → id, user_id, slug (UNIQUE), title, question, created_at
+responses  → id, page_id, message (nullable), rating (1–5), created_at
+```
+
+Passwords are hashed with PBKDF2 + SHA-256 + random salt, 100k iterations, using the Web Crypto API — no external dependencies.
+
+JWTs are signed with HMAC-SHA256 and expire after 7 days.
+
+---
+
+## Roadmap
+
+- [ ] Spam prevention — Cloudflare Turnstile + browser fingerprint + cookie
+- [ ] Delete / edit feedback pages
+- [ ] Email notifications on new response
+- [ ] Response export to CSV
+- [ ] Public responses toggle (opt-in per page)
+- [ ] Shareable response count badge for bios and readmes
