@@ -1,0 +1,18 @@
+name               = "openlet"
+main               = "src/index.js"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding       = "DB"
+database_name = "openlet"
+database_id   = "1277cc3c-1941-4844-9974-138a16915ff4"
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+# JWT_SECRET must NOT be stored here in plaintext.
+# Set it once via CLI and Cloudflare stores it securely:
+#
+#   npx wrangler secret put JWT_SECRET
+#
+# For local dev only, create a .dev.vars file (gitignored):
+#   JWT_SECRET=your_local_secret_here
