@@ -38,9 +38,9 @@ openlet/
 │   │   │   ├── PublicPage.tsx      # Public submission form (/p/:slug)
 │   │   │   └── Responses.tsx       # View responses (owner only)
 │   │   ├── contexts/
-│   │   │   └── AuthContext.tsx     # Auth state + redirect logic
+│   │   │   └── AuthContext.tsx     # Auth state + bootstrap refresh on mount
 │   │   ├── lib/
-│   │   │   └── api.ts              # All API calls
+│   │   │   └── api.ts              # All API calls + silent token refresh
 │   │   └── components/
 │   │       └── ProtectedRoute.tsx
 │   └── .env                        # VITE_API_URL, VITE_TURNSTILE_SITE_KEY
@@ -51,12 +51,13 @@ openlet/
     │   ├── middleware/
     │   │   └── auth.js             # JWT sign/verify (Web Crypto), authMiddleware
     │   └── routes/
-    │       ├── auth.js             # POST /auth/register, POST /auth/login
-    │       ├── pages.js            # GET/POST /pages, GET /pages/:slug
+    │       ├── auth.js             # register, login, refresh, logout
+    │       ├── pages.js            # GET/POST/PUT/DELETE /pages
     │       └── responses.js        # POST /responses/:slug, GET /responses/:slug
     ├── migrations/
-    │   ├── 0001_initial_schema.sql # users, pages, responses tables
-    │   └── 0002_spam_prevention.sql# submission_log table
+    │   ├── 0001_initial_schema.sql  # users, pages, responses tables
+    │   ├── 0002_spam_prevention.sql # submission_log table
+    │   └── 0003_blacklist_token.sql # refresh_token_blacklist table
     ├── wrangler.toml
     └── .dev.vars                   # Local secrets (gitignored)
 ```
@@ -67,12 +68,16 @@ openlet/
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| POST | `/auth/register` | — | `{email, password, name}` → `{token, user}` |
-| POST | `/auth/login` | — | `{email, password}` → `{token, user}` |
+| POST | `/auth/register` | — | `{email, password, name}` → `{accessToken, user}` + sets refresh cookie |
+| POST | `/auth/login` | — | `{email, password}` → `{accessToken, user}` + sets refresh cookie |
+| POST | `/auth/refresh` | — | Rotates refresh cookie → `{accessToken}` |
+| POST | `/auth/logout` | — | Blacklists refresh token + clears cookie |
 | GET | `/pages` | ✅ | List your pages with response counts |
 | POST | `/pages` | ✅ | Create a page `{title, question, slug}` |
 | GET | `/pages/:slug` | — | Public page info |
 | GET | `/pages/:slug/check` | — | Slug availability check |
+| PUT | `/pages/:slug` | ✅ | Update `{title, question}` |
+| DELETE | `/pages/:slug` | ✅ | Delete page + all responses |
 | POST | `/responses/:slug` | — | Submit `{rating, message, fingerprint, turnstileToken}` anonymously |
 | GET | `/responses/:slug` | ✅ | `{page, stats, responses[]}` — owner only |
 
@@ -158,7 +163,7 @@ npx wrangler d1 migrations apply openlet --remote
 
 # Deploy
 npm run deploy
-# → prints your worker URL: https://openlet-worker.<subdomain>.workers.dev
+# → prints your worker URL: https://openlet.<subdomain>.workers.dev
 ```
 
 ### 3. Update CORS
@@ -173,7 +178,7 @@ npm install
 
 # Update env vars with real production values
 cat > .env << EOF
-VITE_API_URL=https://openlet-worker.<subdomain>.workers.dev
+VITE_API_URL=https://openlet.<subdomain>.workers.dev
 VITE_TURNSTILE_SITE_KEY=your_real_turnstile_site_key
 EOF
 
@@ -215,15 +220,16 @@ TURNSTILE_SECRET=1x0000000000000000000000000000000AA
 ## Database schema
 
 ```sql
-users          → id, email, password (PBKDF2), name, created_at
-pages          → id, user_id, slug (UNIQUE), title, question, created_at
-responses      → id, page_id, message (nullable), rating (1–5), created_at
-submission_log → id, page_id, ip, fingerprint, submitted_at
+users                   → id, email, password (PBKDF2), name, created_at
+pages                   → id, user_id, slug (UNIQUE), title, question, created_at
+responses               → id, page_id, message (nullable), rating (1–5), created_at
+submission_log          → id, page_id, ip, fingerprint, submitted_at
+refresh_token_blacklist → token_hash (PK, SHA-256 hex), expires_at (unix timestamp)
 ```
 
 Passwords are hashed with PBKDF2 + SHA-256 + random salt, 100k iterations, using the Web Crypto API — no external dependencies.
 
-JWTs are signed with HMAC-SHA256 and expire after 7 days.
+Auth uses a two-token system. A 15-minute access token is stored in `localStorage` and sent as a `Bearer` header on every request. A 7-day refresh token is stored in an `httpOnly; Secure; SameSite=None` cookie and only sent to `/auth/*` endpoints. On expiry the client silently calls `POST /auth/refresh` to rotate the pair. Used refresh tokens are immediately blacklisted by their SHA-256 hash so they cannot be reused. Blacklist entries are lazily cleaned up on each refresh call via `waitUntil`.
 
 Migrations are managed via Wrangler's built-in D1 migration system under `worker/migrations/`.
 
@@ -234,5 +240,6 @@ Migrations are managed via Wrangler's built-in D1 migration system under `worker
 - [x] Spam prevention — Cloudflare Turnstile + browser fingerprint + cookie
 - [x] Delete / edit feedback pages
 - [x] Response export to CSV
+- [x] Secure token management — httpOnly refresh cookie + access token rotation + blacklist
 - [ ] Public responses toggle (opt-in per page)
 - [ ] Shareable response count badge for bios and readmes
