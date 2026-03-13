@@ -86,9 +86,8 @@ const Dashboard = () => {
     toast("Link copied — now share it somewhere real.");
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate("/");
+  const handleLogout = async () => {
+    await logout();
   };
 
   const openEdit = (e: React.MouseEvent, page: FeedbackPage) => {

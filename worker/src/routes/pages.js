@@ -84,6 +84,23 @@ pages.post("/", authMiddleware, async (c) => {
   return c.json({ page: result }, 201);
 });
 
+// ── GET /pages/:slug/check — check slug availability ─────────────────────────
+// IMPORTANT: must be registered before GET /:slug or Hono matches /:slug first
+
+pages.get("/:slug/check", async (c) => {
+  const { slug } = c.req.param();
+
+  if (!isValidSlug(slug)) {
+    return c.json({ available: false, reason: "Invalid slug format" });
+  }
+
+  const existing = await c.env.DB.prepare("SELECT id FROM pages WHERE slug = ?")
+    .bind(slug)
+    .first();
+
+  return c.json({ available: !existing });
+});
+
 // ── GET /pages/:slug — get page info publicly ─────────────────────────────────
 
 pages.get("/:slug", async (c) => {
@@ -158,22 +175,6 @@ pages.delete("/:slug", authMiddleware, async (c) => {
   await c.env.DB.prepare("DELETE FROM pages WHERE id = ?").bind(page.id).run();
 
   return c.json({ success: true });
-});
-
-// ── GET /pages/:slug/check — check slug availability ─────────────────────────
-
-pages.get("/:slug/check", async (c) => {
-  const { slug } = c.req.param();
-
-  if (!isValidSlug(slug)) {
-    return c.json({ available: false, reason: "Invalid slug format" });
-  }
-
-  const existing = await c.env.DB.prepare("SELECT id FROM pages WHERE slug = ?")
-    .bind(slug)
-    .first();
-
-  return c.json({ available: !existing });
 });
 
 export default pages;
