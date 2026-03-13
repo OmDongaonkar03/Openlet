@@ -50,14 +50,14 @@ const Create = () => {
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
-      {/* Left — what happens after you create */}
-      <div className="lg:w-2/5 border-r border-border flex flex-col justify-between px-10 py-16 bg-secondary/30">
-        <div>
+      {/* Right — the form (rendered first in DOM so it's on top on mobile) */}
+      <div className="lg:w-3/5 flex items-center justify-center px-5 sm:px-8 lg:px-10 py-10 lg:py-16 order-first lg:order-last">
+        <div className="w-full max-w-md">
           <Button
             variant="ghost"
             size="sm"
             asChild
-            className="gap-1.5 -ml-2 mb-12"
+            className="gap-1.5 -ml-2 mb-8 lg:hidden"
           >
             <Link to="/dashboard">
               <ArrowLeft className="w-3.5 h-3.5" />
@@ -65,73 +65,8 @@ const Create = () => {
             </Link>
           </Button>
 
-          <p className="text-xs uppercase tracking-widest text-muted-foreground mb-4">
-            How it works
-          </p>
-          <h2 className="text-2xl mb-10 leading-snug">
-            Three steps to feedback that's actually honest.
-          </h2>
-
-          <div className="space-y-8">
-            {[
-              {
-                icon: Sparkles,
-                step: "01",
-                title: "Create your page",
-                body: "Give it a title and write the one question you want people to answer. Set a custom URL they'll remember.",
-              },
-              {
-                icon: Share2,
-                step: "02",
-                title: "Share the link",
-                body: "Drop it in your bio, email footer, a WhatsApp message, or a Notion doc. Anyone with the link can respond.",
-              },
-              {
-                icon: MessageSquare,
-                step: "03",
-                title: "Read honest responses",
-                body: "Because people know they're anonymous, they tell you what they actually think — not what they think you want to hear.",
-              },
-            ].map(({ icon: Icon, step, title, body }) => (
-              <div key={step} className="flex gap-4">
-                <div className="shrink-0 mt-0.5">
-                  <div className="w-8 h-8 rounded-full border border-border flex items-center justify-center">
-                    <span className="text-xs text-muted-foreground">
-                      {step}
-                    </span>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-sm mb-1">{title}</p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    {body}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-10 border border-border rounded-lg p-4 bg-background">
-          <div className="flex gap-1 mb-2">
-            {[1, 2, 3, 4, 5].map((n) => (
-              <Star key={n} className="w-3.5 h-3.5 fill-primary text-primary" />
-            ))}
-          </div>
-          <p className="text-sm mb-2 leading-relaxed">
-            "Your onboarding flow is confusing after step 3. I almost gave up."
-          </p>
-          <p className="text-xs text-muted-foreground">
-            — Anonymous · 2 hours ago
-          </p>
-        </div>
-      </div>
-
-      {/* Right — the form */}
-      <div className="lg:w-3/5 flex items-center justify-center px-10 py-16">
-        <div className="w-full max-w-md">
           <h1 className="text-2xl mb-2">Create a feedback page</h1>
-          <p className="text-sm text-muted-foreground mb-10">
+          <p className="text-sm text-muted-foreground mb-8 lg:mb-10">
             Takes 30 seconds. Your audience will thank you for asking.
           </p>
 
@@ -187,6 +122,83 @@ const Create = () => {
               {loading ? "Creating your page..." : "Create page →"}
             </Button>
           </form>
+        </div>
+      </div>
+
+      {/* Left — how it works (shown below form on mobile) */}
+      <div className="lg:w-2/5 border-t lg:border-t-0 lg:border-r border-border flex flex-col justify-between px-5 sm:px-8 lg:px-10 py-10 lg:py-16 bg-secondary/30 order-last lg:order-first">
+        <div>
+          <Button
+            variant="ghost"
+            size="sm"
+            asChild
+            className="gap-1.5 -ml-2 mb-12 hidden lg:inline-flex"
+          >
+            <Link to="/dashboard">
+              <ArrowLeft className="w-3.5 h-3.5" />
+              Back
+            </Link>
+          </Button>
+
+          <p className="text-xs uppercase tracking-widest text-muted-foreground mb-4">
+            How it works
+          </p>
+          <h2 className="text-xl sm:text-2xl mb-8 lg:mb-10 leading-snug">
+            Three steps to feedback that's actually honest.
+          </h2>
+
+          <div className="space-y-8">
+            {[
+              {
+                icon: Sparkles,
+                step: "01",
+                title: "Create your page",
+                body: "Give it a title and write the one question you want people to answer. Set a custom URL they'll remember.",
+              },
+              {
+                icon: Share2,
+                step: "02",
+                title: "Share the link",
+                body: "Drop it in your bio, email footer, a WhatsApp message, or a Notion doc. Anyone with the link can respond.",
+              },
+              {
+                icon: MessageSquare,
+                step: "03",
+                title: "Read honest responses",
+                body: "Because people know they're anonymous, they tell you what they actually think — not what they think you want to hear.",
+              },
+            ].map(({ icon: Icon, step, title, body }) => (
+              <div key={step} className="flex gap-4">
+                <div className="shrink-0 mt-0.5">
+                  <div className="w-8 h-8 rounded-full border border-border flex items-center justify-center">
+                    <span className="text-xs text-muted-foreground">
+                      {step}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm mb-1">{title}</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {body}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-10 border border-border rounded-lg p-4 bg-background">
+          <div className="flex gap-1 mb-2">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <Star key={n} className="w-3.5 h-3.5 fill-primary text-primary" />
+            ))}
+          </div>
+          <p className="text-sm mb-2 leading-relaxed">
+            "Your onboarding flow is confusing after step 3. I almost gave up."
+          </p>
+          <p className="text-xs text-muted-foreground">
+            — Anonymous · 2 hours ago
+          </p>
         </div>
       </div>
     </div>

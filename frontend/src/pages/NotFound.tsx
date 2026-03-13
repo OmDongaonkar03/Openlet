@@ -15,7 +15,7 @@ const NotFound = () => {
     <div className="min-h-screen flex flex-col">
       {/* Nav */}
       <header className="border-b border-border">
-        <div className="container flex items-center h-14 max-w-4xl">
+        <div className="container flex items-center h-14 max-w-4xl px-4 sm:px-6">
           <div className="flex items-center gap-2">
             <MessageSquare className="w-4 h-4 text-primary" />
             <span className="text-sm tracking-wide uppercase">Openlet</span>
@@ -23,9 +23,9 @@ const NotFound = () => {
         </div>
       </header>
 
-      <main className="container max-w-4xl flex-1 flex flex-col justify-center py-20">
+      <main className="container max-w-4xl flex-1 flex flex-col justify-center py-10 sm:py-16 px-4 sm:px-6">
         {/* Hero */}
-        <div className="text-center mb-20">
+        <div className="text-center mb-10 sm:mb-16 lg:mb-20">
           <p className="text-xs tracking-widest uppercase text-muted-foreground mb-5">
             404
           </p>
@@ -39,7 +39,7 @@ const NotFound = () => {
           <p className="text-sm text-muted-foreground mb-10">
             Most people aren't. Openlet fixes that.
           </p>
-          <div className="flex items-center justify-center gap-3">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <Button asChild size="lg" className="gap-1.5">
               <Link to="/">
                 Create your free page
@@ -90,13 +90,13 @@ const NotFound = () => {
 
         {/* Social proof strip */}
         <div className="border border-border rounded-lg p-6 mb-16 bg-secondary/30">
-          <div className="grid grid-cols-3 divide-x divide-border text-center">
+          <div className="grid grid-cols-3 divide-x divide-border text-center overflow-hidden">
             {[
               { stat: "30s", label: "to create your page" },
               { stat: "100%", label: "anonymous for respondents" },
               { stat: "Free", label: "forever, no credit card" },
             ].map(({ stat, label }) => (
-              <div key={label} className="px-6">
+              <div key={label} className="px-2 sm:px-6">
                 <p className="text-2xl mb-1">{stat}</p>
                 <p className="text-xs text-muted-foreground">{label}</p>
               </div>
@@ -139,7 +139,7 @@ const NotFound = () => {
       </main>
 
       <footer className="border-t border-border py-6">
-        <div className="container max-w-4xl flex items-center justify-between">
+        <div className="container max-w-4xl flex items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-2">
             <MessageSquare className="w-3.5 h-3.5 text-primary" />
             <span className="text-xs text-muted-foreground">Openlet</span>

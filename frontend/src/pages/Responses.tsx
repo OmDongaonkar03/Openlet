@@ -77,13 +77,13 @@ const Responses = () => {
   const copyLink = () => {
     const url = `${window.location.origin}/p/${slug}`;
     navigator.clipboard.writeText(url);
-    toast("Link copied — share it to get more responses.");
+    toast("Link copied - share it to get more responses.");
   };
 
   return (
     <div className="min-h-screen">
       <header className="border-b border-border">
-        <div className="container flex items-center justify-between h-14 max-w-3xl">
+        <div className="container flex items-center justify-between h-14 max-w-3xl px-4 sm:px-6">
           <Button variant="ghost" size="sm" asChild className="gap-1.5">
             <Link to="/dashboard">
               <ArrowLeft className="w-3.5 h-3.5" />
@@ -91,7 +91,7 @@ const Responses = () => {
             </Link>
           </Button>
           {data && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
               {data.responses.length > 0 && (
                 <Button
                   variant="outline"
@@ -100,7 +100,6 @@ const Responses = () => {
                   className="gap-1.5"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  Export CSV
                 </Button>
               )}
               <Button
@@ -110,14 +109,13 @@ const Responses = () => {
                 className="gap-1.5"
               >
                 <Copy className="w-3.5 h-3.5" />
-                Copy page link
               </Button>
             </div>
           )}
         </div>
       </header>
 
-      <main className="container max-w-3xl py-12">
+      <main className="container max-w-3xl py-8 sm:py-12 px-4 sm:px-6">
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading...</p>
         ) : !data ? (
@@ -134,7 +132,7 @@ const Responses = () => {
               </p>
 
               {/* Stats */}
-              <div className="flex items-center gap-8">
+              <div className="flex items-center gap-4 sm:gap-8 flex-wrap">
                 <div>
                   <p className="text-2xl">{data.stats.total}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
@@ -191,7 +189,7 @@ const Responses = () => {
                   </CardContent>
                 </Card>
 
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
                     {
                       icon: Share2,

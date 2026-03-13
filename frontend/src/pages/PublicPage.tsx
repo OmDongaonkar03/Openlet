@@ -222,7 +222,7 @@ const PublicPage = () => {
   if (notFound) {
     return (
       <div className="min-h-screen flex flex-col lg:flex-row">
-        <div className="lg:w-1/2 border-r border-border flex flex-col justify-between px-12 py-16 bg-secondary/30 min-h-[40vh] lg:min-h-screen">
+        <div className="lg:w-1/2 border-b lg:border-b-0 lg:border-r border-border flex flex-col justify-between px-5 sm:px-8 lg:px-12 py-10 lg:py-16 bg-secondary/30">
           <div className="flex items-center gap-2">
             <MessageSquare className="w-4 h-4 text-primary" />
             <span className="text-xs tracking-widest uppercase text-muted-foreground">
@@ -256,7 +256,7 @@ const PublicPage = () => {
             Free forever · No credit card needed
           </p>
         </div>
-        <div className="lg:w-1/2 flex flex-col items-center justify-center px-12 py-16 text-center">
+        <div className="lg:w-1/2 flex flex-col items-center justify-center px-5 sm:px-8 lg:px-12 py-10 lg:py-16 text-center">
           <div className="w-14 h-14 rounded-full border border-border flex items-center justify-center mb-6">
             <MessageSquare className="w-6 h-6 text-muted-foreground" />
           </div>
@@ -278,7 +278,7 @@ const PublicPage = () => {
   if (alreadySubmitted) {
     return (
       <div className="min-h-screen flex flex-col lg:flex-row">
-        <div className="lg:w-1/2 border-r border-border flex flex-col justify-between px-12 py-16 bg-secondary/30 min-h-[40vh] lg:min-h-screen">
+        <div className="lg:w-1/2 border-b lg:border-b-0 lg:border-r border-border flex flex-col justify-between px-5 sm:px-8 lg:px-12 py-10 lg:py-16 bg-secondary/30">
           <div className="flex items-center gap-2">
             <MessageSquare className="w-4 h-4 text-primary" />
             <span className="text-xs tracking-widest uppercase text-muted-foreground">
@@ -318,7 +318,7 @@ const PublicPage = () => {
             Free forever · No credit card needed
           </p>
         </div>
-        <div className="lg:w-1/2 flex flex-col items-center justify-center px-12 py-16 text-center">
+        <div className="lg:w-1/2 flex flex-col items-center justify-center px-5 sm:px-8 lg:px-12 py-10 lg:py-16 text-center">
           <div className="w-14 h-14 rounded-full bg-secondary flex items-center justify-center mb-6">
             <Check className="w-6 h-6 text-muted-foreground" />
           </div>
@@ -349,7 +349,7 @@ const PublicPage = () => {
   if (submitted) {
     return (
       <div className="min-h-screen flex flex-col lg:flex-row">
-        <div className="lg:w-1/2 border-r border-border flex flex-col justify-between px-12 py-16 bg-secondary/30 min-h-[40vh] lg:min-h-screen">
+        <div className="lg:w-1/2 border-b lg:border-b-0 lg:border-r border-border flex flex-col justify-between px-5 sm:px-8 lg:px-12 py-10 lg:py-16 bg-secondary/30">
           <div className="flex items-center gap-2">
             <MessageSquare className="w-4 h-4 text-primary" />
             <span className="text-xs tracking-widest uppercase text-muted-foreground">
@@ -389,7 +389,7 @@ const PublicPage = () => {
             Free forever · No credit card needed
           </p>
         </div>
-        <div className="lg:w-1/2 flex flex-col items-center justify-center px-12 py-16 text-center">
+        <div className="lg:w-1/2 flex flex-col items-center justify-center px-5 sm:px-8 lg:px-12 py-10 lg:py-16 text-center">
           <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-6">
             <Check className="w-6 h-6 text-primary" />
           </div>
@@ -420,7 +420,7 @@ const PublicPage = () => {
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
       {/* Left — page context + trust signals */}
-      <div className="lg:w-1/2 border-r border-border flex flex-col justify-between px-12 py-16 bg-secondary/30 min-h-[40vh] lg:min-h-screen">
+      <div className="lg:w-1/2 border-b lg:border-b-0 lg:border-r border-border flex flex-col justify-between px-5 sm:px-8 lg:px-12 py-10 lg:py-16 bg-secondary/30 min-h-[auto] lg:min-h-screen">
         <div className="flex items-center gap-2">
           <MessageSquare className="w-4 h-4 text-primary" />
           <span className="text-xs tracking-widest uppercase text-muted-foreground">
@@ -479,7 +479,7 @@ const PublicPage = () => {
       </div>
 
       {/* Right — the form */}
-      <div className="lg:w-1/2 flex items-center justify-center px-8 py-16">
+      <div className="lg:w-1/2 flex items-center justify-center px-5 sm:px-8 lg:px-8 py-10 lg:py-16">
         <div className="w-full max-w-sm">
           <p className="text-xs text-muted-foreground uppercase tracking-widest mb-8">
             Your anonymous response

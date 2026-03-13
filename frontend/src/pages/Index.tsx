@@ -19,7 +19,6 @@ const Index = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-
   const handleAuth = async (mode: "login" | "register") => {
     setLoading(true);
     setError("");
@@ -41,12 +40,12 @@ const Index = () => {
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
       {/* Left — Hero with Infinite Grid */}
-      <div className="lg:w-1/2 min-h-[50vh] lg:min-h-screen">
+      <div className="lg:w-1/2 h-52 sm:h-64 lg:h-auto lg:min-h-screen">
         <InfiniteGrid />
       </div>
 
       {/* Right — Auth */}
-      <div className="lg:w-1/2 flex items-center justify-center px-6 py-16 lg:py-0">
+      <div className="lg:w-1/2 flex items-center justify-center px-5 sm:px-8 py-10 lg:py-0">
         <div className="w-full max-w-sm">
           <div className="mb-8">
             <div className="flex items-center gap-2 mb-2">

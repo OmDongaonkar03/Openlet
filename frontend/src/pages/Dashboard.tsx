@@ -150,7 +150,7 @@ const Dashboard = () => {
     <div className="min-h-screen">
       {/* Header */}
       <header className="border-b border-border">
-        <div className="container flex items-center justify-between h-14 max-w-3xl">
+        <div className="container flex items-center justify-between h-14 max-w-3xl px-4 sm:px-6">
           <div className="flex items-center gap-2">
             <MessageSquare className="w-4 h-4 text-primary" />
             <span className="text-sm tracking-wide uppercase">Openlet</span>
@@ -159,7 +159,6 @@ const Dashboard = () => {
             <Button variant="ghost" size="sm" asChild className="gap-1.5">
               <Link to="/create">
                 <Plus className="w-3.5 h-3.5" />
-                New page
               </Link>
             </Button>
             <Button
@@ -169,16 +168,15 @@ const Dashboard = () => {
               className="gap-1.5"
             >
               <LogOut className="w-3.5 h-3.5" />
-              Logout
             </Button>
           </div>
         </div>
       </header>
 
-      <main className="container max-w-3xl py-12">
+      <main className="container max-w-3xl py-8 sm:py-12 px-4 sm:px-6">
         {/* Stats bar */}
         {!loading && pages.length > 0 && (
-          <div className="flex items-center gap-8 mb-10 pb-10 border-b border-border">
+          <div className="flex items-center gap-4 sm:gap-8 mb-10 pb-10 border-b border-border flex-wrap">
             <div>
               <p className="text-2xl">{pages.length}</p>
               <p className="text-xs text-muted-foreground mt-0.5">
@@ -229,7 +227,7 @@ const Dashboard = () => {
               </CardContent>
             </Card>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {[
                 {
                   icon: Share2,
@@ -301,7 +299,7 @@ const Dashboard = () => {
                         className="gap-1.5 text-xs"
                       >
                         <Copy className="w-3 h-3" />
-                        Copy link
+                        <span className="hidden sm:inline">Copy link</span>
                       </Button>
 
                       <DropdownMenu>
