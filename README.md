@@ -19,7 +19,7 @@ No login, no app, no friction for the person giving feedback.
 | Frontend | React + Vite + TypeScript + Tailwind + shadcn/ui |
 | Backend | Cloudflare Workers + Hono.js |
 | Database | Cloudflare D1 (SQLite) |
-| Auth | JWT via Web Crypto API (no external deps) |
+| Auth | Google OAuth 2.0 + JWT via Web Crypto API (no external deps) |
 | Spam prevention | Cloudflare Turnstile + FingerprintJS + cookie |
 | Rate limiting | Cloudflare Workers Rate Limiting API |
 | Hosting | Cloudflare Pages (frontend) + Workers (backend) |
@@ -33,7 +33,8 @@ openlet/
 ├── frontend/                       # React + Vite
 │   ├── src/
 │   │   ├── pages/
-│   │   │   ├── Index.tsx           # Login / Register
+│   │   │   ├── Index.tsx           # Google sign-in
+│   │   │   ├── AuthCallback.tsx    # OAuth redirect handler (/auth/callback)
 │   │   │   ├── Dashboard.tsx       # Your feedback pages
 │   │   │   ├── Create.tsx          # Create a new page
 │   │   │   ├── PublicPage.tsx      # Public submission form (/p/:slug)
@@ -44,7 +45,7 @@ openlet/
 │   │   │   └── api.ts              # All API calls + silent token refresh
 │   │   └── components/
 │   │       └── ProtectedRoute.tsx
-│   └── .env                        # VITE_API_URL, VITE_TURNSTILE_SITE_KEY
+│   └── .env                        # VITE_API_URL, VITE_TURNSTILE_SITE_KEY, VITE_GOOGLE_CLIENT_ID
 │
 └── worker/                         # Cloudflare Worker + Hono.js
     ├── src/
@@ -52,13 +53,14 @@ openlet/
     │   ├── middleware/
     │   │   └── auth.js             # JWT sign/verify (Web Crypto), authMiddleware
     │   └── routes/
-    │       ├── auth.js             # register, login, refresh, logout
+    │       ├── auth.js             # google, refresh, logout
     │       ├── pages.js            # GET/POST/PUT/DELETE /pages
-    │       └── responses.js        # POST /responses/:slug, GET /responses/:slug
+    │       └── responses.js        # POST /responses/:slug, GET /responses/:slug (paginated)
     ├── migrations/
     │   ├── 0001_initial_schema.sql  # users, pages, responses tables
     │   ├── 0002_spam_prevention.sql # submission_log table
-    │   └── 0003_blacklist_token.sql # refresh_token_blacklist table
+    │   ├── 0003_blacklist_token.sql # refresh_token_blacklist table
+    │   └── 0004_google_oauth.sql    # google_id + avatar on users, password nullable
     ├── wrangler.toml
     └── .dev.vars                   # Local secrets (gitignored)
 ```
@@ -69,8 +71,7 @@ openlet/
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| POST | `/auth/register` | — | `{email, password, name}` → `{accessToken, user}` + sets refresh cookie |
-| POST | `/auth/login` | — | `{email, password}` → `{accessToken, user}` + sets refresh cookie |
+| POST | `/auth/google` | — | `{code, redirectUri}` → `{accessToken, user}` + sets refresh cookie |
 | POST | `/auth/refresh` | — | Rotates refresh cookie → `{accessToken}` |
 | POST | `/auth/logout` | — | Blacklists refresh token + clears cookie |
 | GET | `/pages` | ✅ | List your pages with response counts |
@@ -80,7 +81,7 @@ openlet/
 | PUT | `/pages/:slug` | ✅ | Update `{title, question}` |
 | DELETE | `/pages/:slug` | ✅ | Delete page + all responses |
 | POST | `/responses/:slug` | — | Submit `{rating, message, fingerprint, turnstileToken}` anonymously |
-| GET | `/responses/:slug` | ✅ | `{page, stats, responses[]}` — owner only |
+| GET | `/responses/:slug` | ✅ | `{page, stats, responses[], pagination}` — owner only, cursor-paginated |
 
 ---
 
@@ -102,8 +103,7 @@ Applied at the Worker level using Cloudflare's native Rate Limiting API — no e
 
 | Endpoint | Limit |
 |---|---|
-| `POST /auth/login` | 5 requests / 60s per IP |
-| `POST /auth/register` | 3 requests / 60s per IP |
+| `POST /auth/google` | 3 requests / 60s per IP |
 | `POST /responses/:slug` | 10 requests / 60s per IP |
 
 Rate limits are local to the Cloudflare edge location serving the request. They are not enforced during local development — the bindings are a Workers-only runtime feature.
@@ -126,8 +126,9 @@ npx wrangler d1 create openlet
 cat > .dev.vars << EOF
 JWT_SECRET=your_local_jwt_secret
 TURNSTILE_SECRET=1x0000000000000000000000000000000AA
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
 EOF
-# TURNSTILE_SECRET above is CF's official test key — always passes locally
 
 # Apply all migrations
 npx wrangler d1 migrations apply openlet --local
@@ -147,8 +148,8 @@ npm install
 cat > .env << EOF
 VITE_API_URL=http://localhost:8787
 VITE_TURNSTILE_SITE_KEY=1x00000000000000000000AA
+VITE_GOOGLE_CLIENT_ID=your_google_client_id
 EOF
-# VITE_TURNSTILE_SITE_KEY above is CF's official test site key — always passes locally
 
 # Start dev server
 npm run dev
@@ -172,6 +173,8 @@ npm install
 # Set secrets in Cloudflare
 npx wrangler secret put JWT_SECRET
 npx wrangler secret put TURNSTILE_SECRET
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
 
 # Apply all migrations to production DB
 npx wrangler d1 migrations apply openlet --remote
@@ -195,6 +198,7 @@ npm install
 cat > .env << EOF
 VITE_API_URL=https://openlet.<subdomain>.workers.dev
 VITE_TURNSTILE_SITE_KEY=your_real_turnstile_site_key
+VITE_GOOGLE_CLIENT_ID=your_google_client_id
 EOF
 
 npm run build
@@ -204,7 +208,7 @@ npx wrangler pages deploy dist --project-name=openlet
 Or connect the repo to Cloudflare Pages via the dashboard with:
 - Build command: `npm run build`
 - Output directory: `dist`
-- Environment variables: `VITE_API_URL` and `VITE_TURNSTILE_SITE_KEY`
+- Environment variables: `VITE_API_URL`, `VITE_TURNSTILE_SITE_KEY`, `VITE_GOOGLE_CLIENT_ID`
 
 ---
 
@@ -216,11 +220,15 @@ Or connect the repo to Cloudflare Pages via the dashboard with:
 |---|---|---|
 | `JWT_SECRET` | CF Secret (`wrangler secret put`) | Signs and verifies JWTs. Never commit this. |
 | `TURNSTILE_SECRET` | CF Secret (`wrangler secret put`) | Verifies Turnstile tokens server-side. Never commit this. |
+| `GOOGLE_CLIENT_ID` | CF Secret (`wrangler secret put`) | Google OAuth app client ID. |
+| `GOOGLE_CLIENT_SECRET` | CF Secret (`wrangler secret put`) | Google OAuth app client secret. Never commit this. |
 
-For local dev, put both in `worker/.dev.vars` (already gitignored):
+For local dev, put all four in `worker/.dev.vars` (already gitignored):
 ```
 JWT_SECRET=your_local_jwt_secret
 TURNSTILE_SECRET=1x0000000000000000000000000000000AA
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
 ```
 
 ### Frontend
@@ -229,22 +237,21 @@ TURNSTILE_SECRET=1x0000000000000000000000000000000AA
 |---|---|---|
 | `VITE_API_URL` | `.env` / CF Pages env | Base URL of the deployed worker |
 | `VITE_TURNSTILE_SITE_KEY` | `.env` / CF Pages env | Public site key from Cloudflare Turnstile dashboard |
+| `VITE_GOOGLE_CLIENT_ID` | `.env` / CF Pages env | Google OAuth app client ID |
 
 ---
 
 ## Database schema
 
 ```sql
-users                   → id, email, password (PBKDF2), name, created_at
+users                   → id, email, password (nullable), name, google_id (UNIQUE), avatar, created_at
 pages                   → id, user_id, slug (UNIQUE), title, question, created_at
 responses               → id, page_id, message (nullable), rating (1–5), created_at
 submission_log          → id, page_id, ip, fingerprint, submitted_at
 refresh_token_blacklist → token_hash (PK, SHA-256 hex), expires_at (unix timestamp)
 ```
 
-Passwords are hashed with PBKDF2 + SHA-256 + random salt, 100k iterations, using the Web Crypto API — no external dependencies.
-
-Auth uses a two-token system. A 15-minute access token is stored in `localStorage` and sent as a `Bearer` header on every request. A 7-day refresh token is stored in an `httpOnly; Secure; SameSite=None` cookie and only sent to `/auth/*` endpoints. On expiry the client silently calls `POST /auth/refresh` to rotate the pair. Used refresh tokens are immediately blacklisted by their SHA-256 hash so they cannot be reused. Blacklist entries are lazily cleaned up on each refresh call via `waitUntil`.
+Auth uses Google OAuth 2.0. The frontend redirects to Google, receives an authorization code at `/auth/callback`, and posts it to `POST /auth/google`. The worker exchanges the code for a Google access token, fetches the user's profile, and upserts the user by `google_id`. Existing users are linked by email on first OAuth login.
 
 Migrations are managed via Wrangler's built-in D1 migration system under `worker/migrations/`.
 
@@ -253,9 +260,6 @@ Migrations are managed via Wrangler's built-in D1 migration system under `worker
 ## Roadmap
 
 - [x] Spam prevention — Cloudflare Turnstile + browser fingerprint + cookie
-- [x] Delete / edit feedback pages
-- [x] Response export to CSV
-- [x] Secure token management — httpOnly refresh cookie + access token rotation + blacklist
 - [x] Rate limiting — Cloudflare Workers Rate Limiting API on auth and submission endpoints
 - [ ] Public responses toggle (opt-in per page)
 - [ ] Shareable response count badge for bios and readmes

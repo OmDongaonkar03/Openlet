@@ -39,7 +39,7 @@ The following are out of scope:
 ## Security design notes
 
 **Authentication**
-- Passwords are hashed with PBKDF2 + SHA-256 + random salt at 100,000 iterations using the Web Crypto API. No external dependencies.
+- Auth is handled via Google OAuth 2.0. No passwords are stored. The worker exchanges a short-lived authorization code for a Google access token, fetches the user's verified profile, and upserts the user by `google_id`.
 - Access tokens are short-lived (15 minutes) and stored in `localStorage`.
 - Refresh tokens are long-lived (7 days), stored in `httpOnly; Secure; SameSite=None` cookies, and never exposed to JavaScript.
 - Refresh tokens are single-use. Each rotation immediately blacklists the previous token by its SHA-256 hash.
