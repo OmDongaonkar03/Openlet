@@ -48,55 +48,75 @@ declare global {
 function useTurnstile(onSuccess: (token: string) => void) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
+  // Keep a stable ref to the callback so the effect never needs to re-run when
+  // the parent re-renders — avoids the destroy/re-render loop.
+  const onSuccessRef = useRef(onSuccess);
+  useEffect(() => {
+    onSuccessRef.current = onSuccess;
+  }, [onSuccess]);
+
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
 
   const reset = useCallback(() => {
-    if (widgetIdRef.current && window.turnstile) {
+    if (widgetIdRef.current != null && window.turnstile) {
       window.turnstile.reset(widgetIdRef.current);
     }
   }, []);
 
   useEffect(() => {
-    // Load Turnstile script once
-    if (!document.getElementById("cf-turnstile-script")) {
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let destroyed = false;
+
+    const renderWidget = () => {
+      if (destroyed || !containerRef.current || widgetIdRef.current != null)
+        return;
+      widgetIdRef.current = window.turnstile.render(containerRef.current, {
+        sitekey: siteKey,
+        // Wrap in a stable arrow so Turnstile always calls the latest handler
+        // without the widget being re-created on every render.
+        callback: (token: string) => onSuccessRef.current(token),
+        "expired-callback": () => onSuccessRef.current(""),
+        theme: "light",
+        size: "normal",
+      });
+    };
+
+    const ensureScript = () => {
+      if (document.getElementById("cf-turnstile-script")) return;
       const script = document.createElement("script");
       script.id = "cf-turnstile-script";
-      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+      // ?render=explicit tells Turnstile NOT to auto-scan the DOM, preventing
+      // conflicts with our manual window.turnstile.render() call.
+      script.src =
+        "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
       script.async = true;
       script.defer = true;
       document.head.appendChild(script);
-    }
-
-    // Render widget once script is ready
-    const tryRender = () => {
-      if (containerRef.current && window.turnstile && !widgetIdRef.current) {
-        widgetIdRef.current = window.turnstile.render(containerRef.current, {
-          sitekey: siteKey,
-          callback: onSuccess,
-          theme: "light",
-          size: "normal",
-          retry: "auto",
-          "retry-interval": 3000,
-        });
-      }
     };
 
-    // Poll until turnstile is available (script might still be loading)
-    const interval = setInterval(() => {
-      if (window.turnstile) {
-        tryRender();
-        clearInterval(interval);
+    ensureScript();
+
+    // Poll until both the Turnstile API and the container div are available.
+    intervalId = setInterval(() => {
+      if (window.turnstile && containerRef.current) {
+        clearInterval(intervalId!);
+        intervalId = null;
+        renderWidget();
       }
-    }, 100);
+    }, 50);
 
     return () => {
-      clearInterval(interval);
-      if (widgetIdRef.current && window.turnstile) {
+      destroyed = true;
+      if (intervalId != null) clearInterval(intervalId);
+      if (widgetIdRef.current != null && window.turnstile) {
         window.turnstile.remove(widgetIdRef.current);
         widgetIdRef.current = null;
       }
     };
-  }, [siteKey, onSuccess]);
+    // Intentionally omit onSuccess — we use onSuccessRef so the widget is only
+    // created once per mount, not recreated on every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteKey]);
 
   return { containerRef, reset };
 }
@@ -515,7 +535,10 @@ const PublicPage = () => {
 
             {/* Turnstile widget */}
             <div>
-              <div ref={containerRef} />
+              <div
+                ref={containerRef}
+                style={{ minHeight: "65px", minWidth: "300px" }}
+              />
               {!turnstileToken && (
                 <p className="text-xs text-muted-foreground mt-2">
                   Completing bot check...
