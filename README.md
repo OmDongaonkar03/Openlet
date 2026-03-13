@@ -232,8 +232,7 @@ Migrations are managed via Wrangler's built-in D1 migration system under `worker
 ## Roadmap
 
 - [x] Spam prevention — Cloudflare Turnstile + browser fingerprint + cookie
-- [ ] Delete / edit feedback pages
-- [ ] Email notifications on new response
-- [ ] Response export to CSV
+- [x] Delete / edit feedback pages
+- [x] Response export to CSV
 - [ ] Public responses toggle (opt-in per page)
 - [ ] Shareable response count badge for bios and readmes

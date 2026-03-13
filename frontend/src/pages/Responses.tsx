@@ -3,7 +3,6 @@ import { useParams, Link } from "react-router-dom";
 import { getResponses } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
   ArrowLeft,
@@ -12,6 +11,7 @@ import {
   Copy,
   Share2,
   TrendingUp,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -35,6 +35,31 @@ const ratingLabel = (avg: number) => {
   if (avg >= 1.5) return "Poor";
   return "Very poor";
 };
+
+function exportToCSV(data: ResponsesData) {
+  const escape = (val: string | number) => {
+    const str = String(val ?? "");
+    // Wrap in quotes if it contains a comma, quote, or newline
+    return /[,"\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+  };
+
+  const headers = ["id", "rating", "message", "submitted_at"];
+  const rows = data.responses.map((r) => [
+    escape(r.id),
+    escape(r.rating),
+    escape(r.message ?? ""),
+    escape(new Date(r.created_at).toISOString()),
+  ]);
+
+  const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${data.page.slug}-responses.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 const Responses = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -66,15 +91,28 @@ const Responses = () => {
             </Link>
           </Button>
           {data && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={copyLink}
-              className="gap-1.5"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              Copy page link
-            </Button>
+            <div className="flex items-center gap-2">
+              {data.responses.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => exportToCSV(data)}
+                  className="gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Export CSV
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={copyLink}
+                className="gap-1.5"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                Copy page link
+              </Button>
+            </div>
           )}
         </div>
       </header>
@@ -153,7 +191,6 @@ const Responses = () => {
                   </CardContent>
                 </Card>
 
-                {/* Tips */}
                 <div className="grid grid-cols-3 gap-4">
                   {[
                     {
@@ -221,7 +258,6 @@ const Responses = () => {
                   </Card>
                 ))}
 
-                {/* Bottom nudge */}
                 <div className="pt-6 border-t border-border mt-6 text-center">
                   <p className="text-xs text-muted-foreground mb-3">
                     More responses = more signal. Keep sharing your link.

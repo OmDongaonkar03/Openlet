@@ -73,6 +73,20 @@ export async function createPage(data: {
   });
 }
 
+export async function updatePage(
+  slug: string,
+  data: { title: string; question: string },
+) {
+  return request(`/pages/${slug}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deletePage(slug: string) {
+  return request(`/pages/${slug}`, { method: "DELETE" });
+}
+
 export async function getPageBySlug(slug: string) {
   return request(`/pages/${slug}`);
 }
@@ -80,7 +94,12 @@ export async function getPageBySlug(slug: string) {
 // Responses
 export async function submitResponse(
   slug: string,
-  data: { rating: number; message: string; fingerprint: string | null; turnstileToken: string },
+  data: {
+    rating: number;
+    message: string;
+    fingerprint: string | null;
+    turnstileToken: string;
+  },
 ) {
   return request(`/responses/${slug}`, {
     method: "POST",
