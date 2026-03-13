@@ -172,22 +172,57 @@ responses.get("/:slug", async (c) => {
     return c.json({ error: "Page not found or access denied" }, 404);
   }
 
-  const { results } = await c.env.DB.prepare(
+  const PAGE_SIZE = 20;
+  const limitParam = parseInt(c.req.query("limit") || String(PAGE_SIZE), 10);
+  const limit = Math.min(Math.max(limitParam, 1), 100); // clamp 1–100
+  const cursor = c.req.query("cursor") || null; // last seen response id
+
+  // Fetch stats separately so they always reflect the full dataset,
+  // not just the current page.
+  const stats = await c.env.DB.prepare(
     `
-      SELECT id, message, rating, created_at
+      SELECT
+        COUNT(*) as total,
+        AVG(rating) as avg_rating
       FROM responses
       WHERE page_id = ?
-      ORDER BY created_at DESC
     `,
   )
     .bind(page.id)
+    .first();
+
+  // Cursor: fetch rows with id < cursor (since we order DESC by id).
+  // Fetch limit+1 so we can tell if there's a next page without a COUNT.
+  let query;
+  let bindings;
+
+  if (cursor) {
+    query = `
+      SELECT id, message, rating, created_at
+      FROM responses
+      WHERE page_id = ? AND id < ?
+      ORDER BY id DESC
+      LIMIT ?
+    `;
+    bindings = [page.id, cursor, limit + 1];
+  } else {
+    query = `
+      SELECT id, message, rating, created_at
+      FROM responses
+      WHERE page_id = ?
+      ORDER BY id DESC
+      LIMIT ?
+    `;
+    bindings = [page.id, limit + 1];
+  }
+
+  const { results } = await c.env.DB.prepare(query)
+    .bind(...bindings)
     .all();
 
-  const avgRating = results.length
-    ? (results.reduce((sum, r) => sum + r.rating, 0) / results.length).toFixed(
-        1,
-      )
-    : null;
+  const hasMore = results.length > limit;
+  const rows = hasMore ? results.slice(0, limit) : results;
+  const nextCursor = hasMore ? String(rows[rows.length - 1].id) : null;
 
   return c.json({
     page: {
@@ -197,10 +232,17 @@ responses.get("/:slug", async (c) => {
       question: page.question,
     },
     stats: {
-      total: results.length,
-      avg_rating: avgRating ? parseFloat(avgRating) : null,
+      total: stats.total,
+      avg_rating: stats.avg_rating
+        ? parseFloat(stats.avg_rating.toFixed(1))
+        : null,
     },
-    responses: results,
+    responses: rows,
+    pagination: {
+      has_more: hasMore,
+      next_cursor: nextCursor,
+      limit,
+    },
   });
 });
 

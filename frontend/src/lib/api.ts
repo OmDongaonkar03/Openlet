@@ -196,6 +196,8 @@ export async function submitResponse(
   });
 }
 
-export async function getResponses(slug: string) {
-  return request(`/responses/${slug}`);
+export async function getResponses(slug: string, cursor?: string, limit = 20) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  return request(`/responses/${slug}?${params.toString()}`);
 }

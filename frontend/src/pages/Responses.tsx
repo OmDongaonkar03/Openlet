@@ -26,6 +26,7 @@ interface ResponsesData {
   page: { title: string; slug: string; question: string };
   stats: { total: number; avg_rating: number | null };
   responses: Response[];
+  pagination: { has_more: boolean; next_cursor: string | null; limit: number };
 }
 
 const ratingLabel = (avg: number) => {
@@ -64,15 +65,39 @@ function exportToCSV(data: ResponsesData) {
 const Responses = () => {
   const { slug } = useParams<{ slug: string }>();
   const [data, setData] = useState<ResponsesData | null>(null);
+  const [responses, setResponses] = useState<Response[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
 
   useEffect(() => {
     if (!slug) return;
     getResponses(slug)
-      .then(setData)
+      .then((res: ResponsesData) => {
+        setData(res);
+        setResponses(res.responses);
+        setNextCursor(res.pagination.next_cursor);
+        setHasMore(res.pagination.has_more);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [slug]);
+
+  const loadMore = async () => {
+    if (!slug || !nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res: ResponsesData = await getResponses(slug, nextCursor);
+      setResponses((prev) => [...prev, ...res.responses]);
+      setNextCursor(res.pagination.next_cursor);
+      setHasMore(res.pagination.has_more);
+    } catch {
+      toast("Failed to load more responses.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const copyLink = () => {
     const url = `${window.location.origin}/p/${slug}`;
@@ -92,11 +117,11 @@ const Responses = () => {
           </Button>
           {data && (
             <div className="flex items-center gap-2 flex-wrap justify-end">
-              {data.responses.length > 0 && (
+              {responses.length > 0 && (
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => exportToCSV(data)}
+                  onClick={() => exportToCSV({ ...data, responses })}
                   className="gap-1.5"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -170,7 +195,7 @@ const Responses = () => {
               </div>
             </div>
 
-            {data.responses.length === 0 ? (
+            {responses.length === 0 ? (
               <div className="space-y-4">
                 <Card>
                   <CardContent className="py-14 px-8 text-center">
@@ -221,7 +246,7 @@ const Responses = () => {
               </div>
             ) : (
               <div className="space-y-3">
-                {data.responses.map((r) => (
+                {responses.map((r) => (
                   <Card key={r.id}>
                     <CardContent className="py-5 px-5">
                       <div className="flex items-start justify-between gap-4 mb-3">
@@ -257,18 +282,34 @@ const Responses = () => {
                 ))}
 
                 <div className="pt-6 border-t border-border mt-6 text-center">
-                  <p className="text-xs text-muted-foreground mb-3">
-                    More responses = more signal. Keep sharing your link.
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={copyLink}
-                    className="gap-1.5"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    Copy page link
-                  </Button>
+                  {hasMore ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={loadMore}
+                      disabled={loadingMore}
+                      className="gap-1.5 mb-4"
+                    >
+                      {loadingMore ? "Loading..." : `Load more responses`}
+                    </Button>
+                  ) : (
+                    <p className="text-xs text-muted-foreground mb-3">
+                      {responses.length >= 5
+                        ? `All ${data.stats.total} responses loaded.`
+                        : "More responses = more signal. Keep sharing your link."}
+                    </p>
+                  )}
+                  <div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={copyLink}
+                      className="gap-1.5"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      Copy page link
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
