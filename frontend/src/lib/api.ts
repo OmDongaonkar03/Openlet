@@ -22,14 +22,13 @@ function removeToken() {
 let refreshPromise: Promise<boolean> | null = null;
 
 async function silentRefresh(): Promise<boolean> {
-  // Deduplicate concurrent refresh attempts — only one in-flight at a time
   if (refreshPromise) return refreshPromise;
 
   refreshPromise = (async () => {
     try {
       const res = await fetch(`${API_URL}/auth/refresh`, {
         method: "POST",
-        credentials: "include", // send the httpOnly cookie
+        credentials: "include",
       });
       if (!res.ok) {
         removeToken();
@@ -50,8 +49,6 @@ async function silentRefresh(): Promise<boolean> {
 }
 
 // Core request helper
-// On a 401, attempts one silent refresh and retries the original request.
-// If the refresh also fails, throws so callers can redirect to login.
 
 async function request(
   path: string,
@@ -72,7 +69,6 @@ async function request(
   if (res.status === 401 && retry) {
     const refreshed = await silentRefresh();
     if (refreshed) {
-      // Retry once with the new access token
       return request(path, options, false);
     }
     window.dispatchEvent(new Event("session:expired"));
@@ -87,45 +83,28 @@ async function request(
   return res.json();
 }
 
-// Auth
+// Auth — Google OAuth
+// The frontend handles the Google redirect and gets back an auth code.
+// We send that code + the redirectUri we used to our backend to exchange it.
 
-export async function login(email: string, password: string) {
-  const res = await fetch(`${API_URL}/auth/login`, {
+export async function googleAuth(code: string, redirectUri: string) {
+  const res = await fetch(`${API_URL}/auth/google`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include", // receive the refresh cookie
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ code, redirectUri }),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: "Login failed" }));
-    throw new Error(body.error || "Login failed");
+    const body = await res.json().catch(() => ({ error: "Auth failed" }));
+    throw new Error(body.error || "Google auth failed");
   }
   const data = await res.json();
   setToken(data.accessToken);
-  return data;
-}
-
-export async function register(email: string, password: string, name: string) {
-  const res = await fetch(`${API_URL}/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include", // receive the refresh cookie
-    body: JSON.stringify({ name, email, password }),
-  });
-  if (!res.ok) {
-    const body = await res
-      .json()
-      .catch(() => ({ error: "Registration failed" }));
-    throw new Error(body.error || "Registration failed");
-  }
-  const data = await res.json();
-  setToken(data.accessToken);
-  return data;
+  return data; // { accessToken, user: { id, email, name, avatar } }
 }
 
 export async function logout() {
   removeToken();
-  // Tell the server to blacklist the refresh token + clear the cookie
   await fetch(`${API_URL}/auth/logout`, {
     method: "POST",
     credentials: "include",
@@ -133,8 +112,6 @@ export async function logout() {
 }
 
 export async function bootstrapSession(): Promise<boolean> {
-  // Called once on app mount — tries to rehydrate a session from the
-  // httpOnly refresh cookie if no valid access token exists in localStorage.
   if (getToken()) return true;
   return silentRefresh();
 }

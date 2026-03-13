@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import Index from "./pages/Index";
+import AuthCallback from "./pages/AuthCallback";
 import Dashboard from "./pages/Dashboard";
 import Create from "./pages/Create";
 import PublicPage from "./pages/PublicPage";
@@ -23,10 +24,32 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/" element={<Index />} />
-            <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/create" element={<ProtectedRoute><Create /></ProtectedRoute>} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/create"
+              element={
+                <ProtectedRoute>
+                  <Create />
+                </ProtectedRoute>
+              }
+            />
             <Route path="/p/:slug" element={<PublicPage />} />
-            <Route path="/p/:slug/responses" element={<ProtectedRoute><Responses /></ProtectedRoute>} />
+            <Route
+              path="/p/:slug/responses"
+              element={
+                <ProtectedRoute>
+                  <Responses />
+                </ProtectedRoute>
+              }
+            />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>

@@ -1,7 +1,7 @@
-// POST /auth/register  → issue access token + set refresh cookie
-// POST /auth/login     → issue access token + set refresh cookie
-// POST /auth/refresh   → rotate refresh token, issue new access token
-// POST /auth/logout    → blacklist refresh token + clear cookie
+// src/routes/auth.js
+// POST /auth/google   → exchange Google auth code → issue tokens
+// POST /auth/refresh  → rotate refresh token, issue new access token
+// POST /auth/logout   → blacklist refresh token + clear cookie
 
 import { Hono } from "hono";
 import { rateLimit } from "@elithrar/workers-hono-rate-limit";
@@ -18,56 +18,40 @@ import {
 
 const auth = new Hono();
 
-// Password helpers (Web Crypto PBKDF2)
+// Google token exchange
+// The frontend does the OAuth redirect and receives an authorization code.
+// It sends that code here. We exchange it for an id_token, verify it with
+// Google's tokeninfo endpoint, then upsert the user and issue our own JWTs.
 
-async function hashPassword(password) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const saltHex = Array.from(salt)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+async function exchangeGoogleCode(code, redirectUri, clientId, clientSecret) {
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code",
+    }),
+  });
 
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    { name: "PBKDF2" },
-    false,
-    ["deriveBits"],
-  );
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
-    key,
-    256,
-  );
-  const hashHex = Array.from(new Uint8Array(bits))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error_description || "Google token exchange failed");
+  }
 
-  return `${saltHex}:${hashHex}`;
+  return res.json(); // { access_token, id_token, ... }
 }
 
-async function verifyPassword(password, stored) {
-  const [saltHex, storedHash] = stored.split(":");
-  const salt = new Uint8Array(
-    saltHex.match(/.{2}/g).map((b) => parseInt(b, 16)),
-  );
+async function getGoogleUserInfo(accessToken) {
+  const res = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    { name: "PBKDF2" },
-    false,
-    ["deriveBits"],
-  );
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
-    key,
-    256,
-  );
-  const hashHex = Array.from(new Uint8Array(bits))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  if (!res.ok) throw new Error("Failed to fetch Google user info");
 
-  return hashHex === storedHash;
+  return res.json(); // { id, email, name, picture, verified_email }
 }
 
 // Shared: issue both tokens and set cookie
@@ -84,83 +68,101 @@ async function issueTokens(c, user) {
 
   return {
     accessToken,
-    user: { id: user.id, email: user.email, name: user.name },
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      avatar: user.avatar,
+    },
   };
 }
 
-// POST /auth/register
+// POST /auth/google
 
 auth.post(
-  "/register",
+  "/google",
   (c, next) =>
     rateLimit(
-      c.env.RL_REGISTER,
+      c.env.RL_REGISTER, // reuse register limiter: 3/min per IP
       (c) => c.req.header("CF-Connecting-IP") || "unknown",
     )(c, next),
   async (c) => {
-    const { email, password, name } = await c.req.json();
+    const { code, redirectUri } = await c.req.json();
 
-    if (!email || !password || !name) {
-      return c.json({ error: "email, password and name are required" }, 400);
-    }
-    if (password.length < 8) {
-      return c.json({ error: "Password must be at least 8 characters" }, 400);
+    if (!code || !redirectUri) {
+      return c.json({ error: "code and redirectUri are required" }, 400);
     }
 
-    const existing = await c.env.DB.prepare(
-      "SELECT id FROM users WHERE email = ?",
-    )
-      .bind(email.toLowerCase())
-      .first();
-
-    if (existing) return c.json({ error: "Email already registered" }, 409);
-
-    const hashed = await hashPassword(password);
-
-    const result = await c.env.DB.prepare(
-      "INSERT INTO users (email, password, name) VALUES (?, ?, ?) RETURNING id",
-    )
-      .bind(email.toLowerCase(), hashed, name)
-      .first();
-
-    const { accessToken, user } = await issueTokens(c, {
-      id: result.id,
-      email: email.toLowerCase(),
-      name,
-    });
-
-    return c.json({ accessToken, user }, 201);
-  },
-);
-
-// POST /auth/login
-
-auth.post(
-  "/login",
-  (c, next) =>
-    rateLimit(
-      c.env.RL_LOGIN,
-      (c) => c.req.header("CF-Connecting-IP") || "unknown",
-    )(c, next),
-  async (c) => {
-    const { email, password } = await c.req.json();
-
-    if (!email || !password) {
-      return c.json({ error: "email and password are required" }, 400);
+    // 1. Exchange code for Google tokens
+    let googleTokens;
+    try {
+      googleTokens = await exchangeGoogleCode(
+        code,
+        redirectUri,
+        c.env.GOOGLE_CLIENT_ID,
+        c.env.GOOGLE_CLIENT_SECRET,
+      );
+    } catch (e) {
+      return c.json({ error: e.message || "Google auth failed" }, 400);
     }
 
-    const user = await c.env.DB.prepare("SELECT * FROM users WHERE email = ?")
-      .bind(email.toLowerCase())
+    // 2. Get user info from Google
+    let googleUser;
+    try {
+      googleUser = await getGoogleUserInfo(googleTokens.access_token);
+    } catch (e) {
+      return c.json({ error: "Failed to fetch Google profile" }, 400);
+    }
+
+    if (!googleUser.verified_email) {
+      return c.json({ error: "Google account email is not verified" }, 400);
+    }
+
+    const { id: googleId, email, name, picture: avatar } = googleUser;
+
+    // 3. Upsert user — find by google_id first, then by email (existing users)
+    let user = await c.env.DB.prepare("SELECT * FROM users WHERE google_id = ?")
+      .bind(googleId)
       .first();
 
-    if (!user) return c.json({ error: "Invalid email or password" }, 401);
+    if (!user) {
+      // Check if email already exists (user registered before OAuth was added)
+      const byEmail = await c.env.DB.prepare(
+        "SELECT * FROM users WHERE email = ?",
+      )
+        .bind(email.toLowerCase())
+        .first();
 
-    const valid = await verifyPassword(password, user.password);
-    if (!valid) return c.json({ error: "Invalid email or password" }, 401);
+      if (byEmail) {
+        // Link Google account to existing user
+        await c.env.DB.prepare(
+          "UPDATE users SET google_id = ?, avatar = ? WHERE id = ?",
+        )
+          .bind(googleId, avatar, byEmail.id)
+          .run();
+        user = { ...byEmail, google_id: googleId, avatar };
+      } else {
+        // New user — create
+        user = await c.env.DB.prepare(
+          "INSERT INTO users (email, name, google_id, avatar) VALUES (?, ?, ?, ?) RETURNING *",
+        )
+          .bind(email.toLowerCase(), name, googleId, avatar)
+          .first();
+      }
+    } else {
+      // Refresh avatar in case it changed
+      if (user.avatar !== avatar) {
+        await c.env.DB.prepare("UPDATE users SET avatar = ? WHERE id = ?")
+          .bind(avatar, user.id)
+          .run();
+        user = { ...user, avatar };
+      }
+    }
 
+    // 4. Issue our own JWT pair
     const { accessToken, user: userData } = await issueTokens(c, user);
 
-    return c.json({ accessToken, user: userData });
+    return c.json({ accessToken, user: userData }, 200);
   },
 );
 
@@ -213,7 +215,7 @@ auth.post("/refresh", async (c) => {
 
   // 5. Look up user (ensure they still exist)
   const user = await c.env.DB.prepare(
-    "SELECT id, email, name FROM users WHERE id = ?",
+    "SELECT id, email, name, avatar FROM users WHERE id = ?",
   )
     .bind(payload.userId)
     .first();
