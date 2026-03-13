@@ -1,6 +1,6 @@
 # Openlet
 
-Anonymous feedback pages. Create a link, share it, get honest responses — no accounts required for respondents.
+Anonymous feedback pages. Create a link, share it, get honest responses - no accounts required for respondents.
 
 ---
 
@@ -21,6 +21,7 @@ No login, no app, no friction for the person giving feedback.
 | Database | Cloudflare D1 (SQLite) |
 | Auth | JWT via Web Crypto API (no external deps) |
 | Spam prevention | Cloudflare Turnstile + FingerprintJS + cookie |
+| Rate limiting | Cloudflare Workers Rate Limiting API |
 | Hosting | Cloudflare Pages (frontend) + Workers (backend) |
 
 ---
@@ -88,10 +89,24 @@ openlet/
 Every anonymous submission passes through three layers before being saved:
 
 1. **Cookie** — checked instantly on page load. If the user has already submitted to this slug, the form is never shown. No server round-trip.
-2. **Cloudflare Turnstile** — invisible bot challenge loaded in the form. Submit button is disabled until the token is issued. Token is verified server-side against CF's API before anything else runs.
+2. **Cloudflare Turnstile** — bot challenge loaded in the form. Submit button is disabled until the token is issued. Token is verified server-side against CF's API before anything else runs.
 3. **IP + Fingerprint** — after Turnstile passes, the worker checks `submission_log` for a matching `(page_id, ip)` or `(page_id, fingerprint)` pair. Either match blocks the submission with a `429`.
 
 On success, the IP and fingerprint are written to `submission_log` for future checks.
+
+---
+
+## Rate limiting
+
+Applied at the Worker level using Cloudflare's native Rate Limiting API — no external service, no DB reads, handled at the edge.
+
+| Endpoint | Limit |
+|---|---|
+| `POST /auth/login` | 5 requests / 60s per IP |
+| `POST /auth/register` | 3 requests / 60s per IP |
+| `POST /responses/:slug` | 10 requests / 60s per IP |
+
+Rate limits are local to the Cloudflare edge location serving the request. They are not enforced during local development — the bindings are a Workers-only runtime feature.
 
 ---
 
@@ -241,5 +256,6 @@ Migrations are managed via Wrangler's built-in D1 migration system under `worker
 - [x] Delete / edit feedback pages
 - [x] Response export to CSV
 - [x] Secure token management — httpOnly refresh cookie + access token rotation + blacklist
+- [x] Rate limiting — Cloudflare Workers Rate Limiting API on auth and submission endpoints
 - [ ] Public responses toggle (opt-in per page)
 - [ ] Shareable response count badge for bios and readmes

@@ -9,6 +9,32 @@ database_name = "openlet"
 database_id   = "1277cc3c-1941-4844-9974-138a16915ff4"
 migrations_dir = "migrations"
 
+# ── Rate Limiters ─────────────────────────────────────────────────────────────
+
+[[ratelimits]]
+name         = "RL_LOGIN"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit  = 5
+  period = 60
+
+[[ratelimits]]
+name         = "RL_REGISTER"
+namespace_id = "1002"
+
+  [ratelimits.simple]
+  limit  = 3
+  period = 60
+
+[[ratelimits]]
+name         = "RL_RESPONSES"
+namespace_id = "1003"
+
+  [ratelimits.simple]
+  limit  = 10
+  period = 60
+
 # ── Secrets ───────────────────────────────────────────────────────────────────
 # Never put secrets in this file. Set them via CLI:
 #
